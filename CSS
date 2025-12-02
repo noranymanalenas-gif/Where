@@ -1,0 +1,164 @@
+// Globala variabler
+let map;
+let marker; // För att visa spelarens gissning
+let correctMarker; // För att visa den rätta platsen
+let currentDestination;
+
+// Array med destinationer (lägger in några exempel, du kan lägga till hur många du vill!)
+// Varje objekt har:
+//   - name: Namnet på platsen
+//   - lat: Latitud (breddgrad)
+//   - lng: Longitud (längdgrad)
+//   - imageUrl: Sökvägen till bilden. Lägg bilderna i en 'images'-mapp.
+const destinations = [
+    { name: "Eiffeltornet, Paris", lat: 48.8584, lng: 2.2945, imageUrl: "images/eiffel.jpg" },
+    { name: "Grand Canyon, USA", lat: 36.1000, lng: -112.1000, imageUrl: "images/grand_canyon.jpg" },
+    { name: "Frihetsgudinnan, New York", lat: 40.6892, lng: -74.0445, imageUrl: "images/statue_of_liberty.jpg" },
+    { name: "Taj Mahal, Indien", lat: 27.1750, lng: 78.0422, imageUrl: "images/taj_mahal.jpg" },
+    { name: "Colosseum, Rom", lat: 41.8902, lng: 12.4922, imageUrl: "images/colosseum.jpg" }
+    // Lägg till fler destinationer här!
+];
+
+// Funktion för att beräkna avstånd mellan två punkter (Haversine-formeln)
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371; // Jordens radie i kilometer
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = R * c; // Avstånd i kilometer
+    return distance;
+}
+
+// Funktion för att starta en ny omgång
+function startNewRound() {
+    // Slumpa fram en ny destination
+    const randomIndex = Math.floor(Math.random() * destinations.length);
+    currentDestination = destinations[randomIndex];
+
+    // Visa laddningstext och dölj kartan/resultat
+    document.getElementById('loading-text').style.display = 'block';
+    document.getElementById('location-image').style.display = 'none';
+    document.getElementById('map').style.display = 'none';
+    document.getElementById('instruction').style.display = 'none';
+    document.getElementById('result').style.display = 'none';
+    document.getElementById('guessButton').style.display = 'none';
+    document.getElementById('nextRoundButton').style.display = 'none';
+    document.getElementById('startGameButton').style.display = 'block'; // Visa startknappen igen
+
+    // Ta bort gamla markörer om de finns
+    if (marker) {
+        map.removeLayer(marker);
+        marker = null;
+    }
+    if (correctMarker) {
+        map.removeLayer(correctMarker);
+        correctMarker = null;
+    }
+
+    // Ladda bilden
+    const imgElement = document.getElementById('location-image');
+    imgElement.src = currentDestination.imageUrl;
+    imgElement.onload = () => {
+        document.getElementById('loading-text').style.display = 'none';
+        imgElement.style.display = 'block';
+        document.getElementById('startGameButton').style.display = 'block'; // Se till att startknappen syns efter bildladdning
+    };
+    imgElement.onerror = () => {
+        document.getElementById('loading-text').textContent = "Kunde inte ladda bild.";
+        console.error("Kunde inte ladda bild för: " + currentDestination.name);
+    };
+
+    // Återställ kartvyn
+    if (map) {
+        map.setView([0, 0], 2); // Zooma ut till hela världen
+    }
+}
+
+// Funktion för att initialisera kartan
+function initMap() {
+    // Initialisera kartan med Leaflet
+    map = L.map('map').setView([0, 0], 2); // Centrera på [0,0] med zoomnivå 2 (hela världen)
+
+    // Lägg till OpenStreetMap-brickor
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+    // Hantera klick på kartan
+    map.on('click', function(e) {
+        if (!marker) { // Lägg bara till en markör om ingen redan finns
+            marker = L.marker(e.latlng).addTo(map)
+                .bindPopup("Din gissning").openPopup();
+            document.getElementById('guessButton').style.display = 'block'; // Visa gissningsknappen
+        } else { // Flytta markören om den redan finns
+            marker.setLatLng(e.latlng);
+            marker.getPopup().setContent("Din gissning").openPopup();
+        }
+    });
+}
+
+// Händelselyssnare när sidan laddas
+document.addEventListener('DOMContentLoaded', () => {
+    initMap(); // Initialisera kartan direkt
+    startNewRound(); // Starta första omgången
+
+    // Hantera "Starta nytt spel" knappen
+    document.getElementById('startGameButton').addEventListener('click', () => {
+        document.getElementById('startGameButton').style.display = 'none'; // Dölj startknappen
+        document.getElementById('location-image').style.display = 'block'; // Visa bilden igen
+        document.getElementById('map').style.display = 'block'; // Visa kartan
+        document.getElementById('instruction').style.display = 'block'; // Visa instruktionen
+        map.invalidateSize(); // Se till att kartan renderas korrekt efter att ha blivit synlig
+    });
+
+    // Hantera "Gissa platsen" knappen
+    document.getElementById('guessButton').addEventListener('click', () => {
+        if (!marker) {
+            alert('Vänligen klicka på kartan för att placera din gissning!');
+            return;
+        }
+
+        document.getElementById('guessButton').style.display = 'none'; // Dölj gissningsknappen
+        document.getElementById('nextRoundButton').style.display = 'block'; // Visa "Nästa omgång" knappen
+
+        const guessedLat = marker.getLatLng().lat;
+        const guessedLng = marker.getLatLng().lng;
+
+        const correctLat = currentDestination.lat;
+        const correctLng = currentDestination.lng;
+
+        // Visa den korrekta platsen på kartan
+        correctMarker = L.marker([correctLat, correctLng], {
+            icon: L.icon({
+                iconUrl: 'https://cdn.rawgit.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                iconSize: [25, 41],
+                iconAnchor: [12, 41],
+                popupAnchor: [1, -34],
+                shadowSize: [41, 41]
+            })
+        }).addTo(map)
+        .bindPopup(`Rätt plats: ${currentDestination.name}`).openPopup();
+
+        // Rita en linje mellan gissningen och den rätta platsen
+        L.polyline([[guessedLat, guessedLng], [correctLat, correctLng]], {color: 'red'}).addTo(map);
+
+        // Beräkna och visa avståndet
+        const distance = calculateDistance(guessedLat, guessedLng, correctLat, correctLng);
+        document.getElementById('distance').textContent = distance.toFixed(2); // Visa med 2 decimaler
+        document.getElementById('correct-coords').textContent = `${correctLat.toFixed(4)}, ${correctLng.toFixed(4)} (${currentDestination.name})`;
+        document.getElementById('result').style.display = 'block'; // Visa resultatdiven
+
+        // Centrera kartan runt båda markörerna
+        const bounds = L.latLngBounds(marker.getLatLng(), correctMarker.getLatLng());
+        map.fitBounds(bounds, {padding: [50, 50]});
+    });
+
+    // Hantera "Nästa omgång" knappen
+    document.getElementById('nextRoundButton').addEventListener('click', () => {
+        startNewRound();
+    });
+});
