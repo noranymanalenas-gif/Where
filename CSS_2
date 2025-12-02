@@ -1,0 +1,105 @@
+body {
+    font-family: Arial, sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start; /* Justera till toppen */
+    min-height: 100vh;
+    margin: 0;
+    background-color: #f4f4f4;
+    padding: 20px; /* Lägg till lite padding runt om */
+    box-sizing: border-box; /* Se till att padding inte förstör bredden */
+}
+
+.container {
+    background-color: #fff;
+    padding: 30px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    text-align: center;
+    max-width: 800px; /* Begränsa bredden för bättre läsbarhet */
+    width: 100%;
+}
+
+h1 {
+    color: #333;
+    margin-bottom: 10px;
+}
+
+p {
+    color: #555;
+    margin-bottom: 20px;
+}
+
+#image-container {
+    margin-bottom: 20px;
+    background-color: #eee;
+    padding: 10px;
+    border-radius: 5px;
+    min-height: 200px; /* Minsta höjd för att undvika layouthopp */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+}
+
+#location-image {
+    max-width: 100%;
+    height: auto;
+    max-height: 400px; /* Begränsa höjden på bilden */
+    border-radius: 5px;
+    display: block; /* Tar bort extra utrymme under bilden */
+    margin: 0 auto; /* Centrera bilden */
+}
+
+#loading-text {
+    font-style: italic;
+    color: #777;
+}
+
+.btn {
+    background-color: #007bff;
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+    margin: 5px;
+    transition: background-color 0.2s ease;
+}
+
+.btn:hover {
+    background-color: #0056b3;
+}
+
+#map-container {
+    margin-top: 20px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    overflow: hidden; /* För att hålla kartan inom ramen */
+}
+
+#map {
+    height: 400px; /* Höjd på kartan */
+    width: 100%;
+    display: none; /* Dölj kartan initialt */
+}
+
+#instruction {
+    font-style: italic;
+    color: #777;
+    margin-top: 10px;
+}
+
+#result {
+    margin-top: 20px;
+    padding: 15px;
+    background-color: #e9f7ef; /* Ljusgrön bakgrund för resultat */
+    border: 1px solid #d4edda;
+    border-radius: 5px;
+    color: #155724; /* Mörkgrön text */
+}
+
+#result p {
+    margin-bottom: 5px;
+}
