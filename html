@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Närmast Vinner - Geografispel</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIINfQPDWHyDn7QgCjPuD4fAFrAgWfbTjSfd8c8zhBE4BcpMkpPI7rY6"
+        crossorigin=""/>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Var är jag?</h1>
+        <p>Gissa var på kartan bilden är tagen!</p>
+
+        <div id="image-container">
+            <img id="location-image" src="" alt="Destination Image">
+            <p id="loading-text">Laddar ny destination...</p>
+        </div>
+
+        <button id="startGameButton" class="btn">Starta nytt spel</button>
+        <button id="guessButton" class="btn" style="display: none;">Gissa platsen</button>
+        <button id="nextRoundButton" class="btn" style="display: none;">Nästa omgång</button>
+
+        <div id="map-container">
+            <div id="map"></div> <p id="instruction" style="display: none;">Klicka på kartan för att placera din gissning.</p>
+        </div>
+        
+        <div id="result" style="display: none;">
+            <p>Du gissade: <span id="distance"></span> km bort!</p>
+            <p>Rätt plats:</p>
+            <p id="correct-coords"></p>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJNQFmrZ+FJ6BuE0PaQ+CgMfD/scXhAVRU/HDVaAD2FvvhpNAw"
+        crossorigin=""></script>
+    <script src="script.js"></script>
+</body>
+</html>
