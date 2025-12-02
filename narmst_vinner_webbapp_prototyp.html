@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Närmast Vinner — Multiplayer Prototyp</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { font-family: Inter, Arial, sans-serif; margin: 0; display:flex; height:100vh; }
+    #left { width: 360px; min-width:280px; max-width:420px; padding:12px; box-sizing:border-box; border-right:1px solid #eee; overflow:auto }
+    #map { flex:1; height:100%; }
+    input, select, button { width:100%; padding:8px; margin:6px 0; box-sizing:border-box }
+    .small { width:48%; display:inline-block }
+    .row { display:flex; gap:8px }
+    .players, .guesses { margin-top:10px }
+    .player { padding:6px; border-bottom:1px solid #f1f1f1 }
+    .admin-badge { background:#333;color:#fff;padding:2px 6px;border-radius:4px;font-size:12px }
+  </style>
+</head>
+<body>
+  <div id="left">
+    <h2>Närmast Vinner — Multiplayer</h2>
+
+    <label>Spelarnamn</label>
+    <input id="playerName" placeholder="Ditt namn (ex: Anna)" />
+
+    <label>Rumskod (skapa eller gå med)</label>
+    <input id="roomId" placeholder="Ex: fika123" />
+    <div class="row">
+      <button id="createBtn">Skapa rum</button>
+      <button id="joinBtn">Gå med</button>
+    </div>
+
+    <div id="adminPanel" class="hidden">
+      <h3>Adminkontroller</h3>
+      <label>Förvald tid (sek)</label>
+      <input id="roundDuration" type="number" value="30" />
+
+      <label>Välj mål (dubbelklicka på kartan för att lägga till eller använd lat,lng)</label>
+      <input id="latlng" placeholder="lat,lng" />
+      <div class="row">
+        <button id="addPointBtn">Lägg till mål</button>
+        <button id="clearTargetsBtn">Rensa mål</button>
+      </div>
+
+      <button id="startRoundBtn">Starta runda</button>
+      <button id="revealBtn">Avslöja målet nu</button>
+    </div>
+
+    <div id="playerControls" class="hidden">
+      <p id="status">Inte ansluten</p>
+      <p id="timer">Tid: —</p>
+      <button id="makeGuessBtn" disabled>Gissa (klicka på kartan)</button>
+    </div>
+
+    <h4>Spelare</h4>
+    <div id="players" class="players"></div>
+
+    <h4>Resultat / avstånd</h4>
+    <div id="results" class="guesses"></div>
+
+    <p style="margin-top:12px;font-size:13px;color:#666">Anm: Byt ut firebaseConfig i koden med ditt Firebase-projekt och aktivera Realtime Database (read/write under test eller säkra regler). Använd anonym inloggning i Authentication.</p>
+  </div>
+
+  <div id="map"></div>
+
+  <script type="module">
+    // ======= IMPORTANT =======
+    // Replace the firebaseConfig below with your Firebase project's config.
+    // Enable Authentication -> Sign-in method -> Anonymous
+    // Enable Realtime Database and set rules suitable for testing.
+    // ==========================
+
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.24.0/firebase-app.js';
+    import { getDatabase, ref, push, set, onValue, update, get, child, remove } from 'https://www.gstatic.com/firebasejs/9.24.0/firebase-database.js';
+    import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/9.24.0/firebase-auth.js';
+
+    const firebaseConfig = {
+      apiKey: "REPLACE_ME",
+      authDomain: "REPLACE_ME",
+      databaseURL: "REPLACE_ME",
+      projectId: "REPLACE_ME",
+      storageBucket: "REPLACE_ME",
+      messagingSenderId: "REPLACE_ME",
+      appId: "REPLACE_ME"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const auth = getAuth(app);
+
+    // Anonymous sign-in
+    let currentUid = null;
+    signInAnonymously(auth).then(cred => {
+      currentUid = cred.user.uid;
+      console.log('Signed in anonymously', currentUid);
+    }).catch(err => console.error(err));
+
+    // Leaflet map
+    const Lcss = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    const mapDiv = document.getElementById('map');
+    const map = L.map(mapDiv).setView([59.3293,18.0686],5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    // UI refs
+    const playerNameInput = document.getElementById('playerName');
+    const roomIdInput = document.getElementById('roomId');
+
+    const createBtn = document.getElementById('createBtn');
+    const joinBtn = document.getElementById('joinBtn');
+
+    const adminPanel = document.getElementById('adminPanel');
+    const playerControls = document.getElementById('playerControls');
+    const playersDiv = document.getElementById('players');
+    const resultsDiv = document.getElementById('results');
+
+    const startRoundBtn = document.getElementById('startRoundBtn');
+    const revealBtn = document.getElementById('revealBtn');
+    const roundDurationInput = document.getElementById('roundDuration');
+    const statusP = document.getElementById('status');
+    const timerP = document.getElementById('timer');
+    const makeGuessBtn = document.getElementById('makeGuessBtn');
+    const latlngInput = document.getElementById('latlng');
+    const addPointBtn = document.getElementById('addPointBtn');
+    const clearTargetsBtn = document.getElementById('clearTargetsBtn');
+
+    let roomRef = null;
+    let localRoomId = null;
+    let isAdmin = false;
+    let localPlayer = null;
+
+    // Map markers
+    let myGuessMarker = null;
+    let targetMarkers = {};
+
+    // Create room
+    createBtn.addEventListener('click', async () => {
+      const roomId = roomIdInput.value.trim();
+      const name = playerNameInput.value.trim();
+      if (!roomId || !name) return alert('Ange rumskod och namn');
+
+      localRoomId = roomId;
+      roomRef = ref(db, `rooms/${roomId}`);
+      isAdmin = true;
+
+      // Initialize room state
+      await set(roomRef, {
+        created: Date.now(),
+        adminUid: currentUid,
+        players: {},
+        targets: {},
+        round: { status: 'idle' }
+      });
+
+      joinRoomAsPlayer(name);
+      adminPanel.classList.remove('hidden');
+      playerControls.classList.remove('hidden');
+      statusP.innerText = 'Du är admin — vänta på att starta runda';
+      setupRealtimeListeners();
+    });
+
+    // Join room
+    joinBtn.addEventListener('click', async () => {
+      const roomId = roomIdInput.value.trim();
+      const name = playerNameInput.value.trim();
+      if (!roomId || !name) return alert('Ange rumskod och namn');
+
+      localRoomId = roomId;
+      roomRef = ref(db, `rooms/${roomId}`);
+
+      // Ensure room exists (create minimal if not)
+      const snapshot = await get(roomRef);
+      if (!snapshot.exists()) {
+        // create basic structure (no admin)
+        await set(roomRef, { created: Date.now(), adminUid: null, players: {}, targets: {}, round: { status: 'idle' } });
+      }
+
+      joinRoomAsPlayer(name);
+      adminPanel.classList.add('hidden');
+      playerControls.classList.remove('hidden');
+      statusP.innerText = 'Ansluten — vänta på att runda startar';
+      setupRealtimeListeners();
+    });
+
+    async function joinRoomAsPlayer(name) {
+      localPlayer = { uid: currentUid, name };
+      const playerRef = ref(db, `rooms/${localRoomId}/players/${currentUid}`);
+      await set(playerRef, { name, joined: Date.now(), guess: null });
+    }
+
+    // Add target (admin)
+    addPointBtn.addEventListener('click', async () => {
+      if (!isAdmin) return;
+      const v = latlngInput.value.trim();
+      if (!v) return alert('Ange lat,lng eller dubbelklicka på kartan');
+      const parts = v.split(',').map(s => parseFloat(s.trim()));
+      if (parts.length !== 2 || isNaN(parts[0]) || isNaN(parts[1])) return alert('Fel format');
+      const tRef = push(ref(db, `rooms/${localRoomId}/targets`));
+      await set(tRef, { lat: parts[0], lng: parts[1], created: Date.now() });
+      latlngInput.value = '';
+    });
+
+    clearTargetsBtn.addEventListener('click', async () => {
+      if (!isAdmin) return;
+      await set(ref(db, `rooms/${localRoomId}/targets`), {});
+    });
+
+    // Map double-click adds target (admin)
+    map.on('dblclick', async (e) => {
+      if (!isAdmin || !localRoomId) return;
+      const tRef = push(ref(db, `rooms/${localRoomId}/targets`));
+      await set(tRef, { lat: e.latlng.lat, lng: e.latlng.lng, created: Date.now() });
+    });
+
+    // Start round (admin)
+    startRoundBtn.addEventListener('click', async () => {
+      if (!isAdmin) return;
+      const dur = parseInt(roundDurationInput.value,10) || 30;
+      // Set round object with start timestamp
+      await update(ref(db, `rooms/${localRoomId}/round`), { status: 'running', start: Date.now(), duration: dur, revealed: false });
+    });
+
+    // Reveal immediately
+    revealBtn.addEventListener('click', async () => {
+      if (!isAdmin) return;
+      await update(ref(db, `rooms/${localRoomId}/round`), { revealed: true });
+    });
+
+    // Player can make a guess (click on map) but only once per round
+    let hasGuessedThisRound = false;
+
+    map.on('click', async (e) => {
+      if (!localRoomId || !localPlayer) return;
+      // Check round status
+      const roundSnap = await get(ref(db, `rooms/${localRoomId}/round`));
+      if (!roundSnap.exists() || roundSnap.val().status !== 'running') return;
+
+      // Check if already guessed
+      const playerSnap = await get(ref(db, `rooms/${localRoomId}/players/${currentUid}/guess`));
+      if (playerSnap.exists()) return alert('Du har redan gissat den här rundan.');
+
+      // Save guess
+      const guess = { lat: e.latlng.lat, lng: e.latlng.lng, time: Date.now() };
+      await set(ref(db, `rooms/${localRoomId}/players/${currentUid}/guess`), guess);
+    });
+
+    // Listen to realtime updates for players, targets, and round
+    function setupRealtimeListeners() {
+      // players
+      onValue(ref(db, `rooms/${localRoomId}/players`), (snap) => {
+        const val = snap.val() || {};
+        playersDiv.innerHTML = '';
+        Object.keys(val).forEach(uid => {
+          const p = val[uid];
+          const el = document.createElement('div');
+          el.className = 'player';
+          el.innerHTML = `<strong>${p.name}</strong> ${uid===currentUid?'<span class="admin-badge">DU</span>':''}` +
+                         `<div style="font-size:12px;color:#666">Gissning: ${p.guess? 'satt' : '—'}</div>`;
+          playersDiv.appendChild(el);
+        });
+      });
+
+      // targets
+      onValue(ref(db, `rooms/${localRoomId}/targets`), (snap) => {
+        const val = snap.val() || {};
+        // clear markers
+        Object.values(targetMarkers).forEach(m => map.removeLayer(m));
+        targetMarkers = {};
+        Object.keys(val).forEach(k => {
+          const t = val[k];
+          const m = L.circleMarker([t.lat, t.lng], { radius:8 }).addTo(map).bindPopup('Mål');
+          targetMarkers[k] = m;
+        });
+      });
+
+      // round
+      onValue(ref(db, `rooms/${localRoomId}/round`), (snap) => {
+        const round = snap.val() || { status: 'idle' };
+        if (round.status === 'running') {
+          isRoundRunning(round);
+        } else {
+          timerP.innerText = 'Ingen aktiv runda';
+        }
+
+        if (round.revealed) {
+          // compute results
+          computeResultsAndShow();
+        }
+      });
+
+      // results listener (players' guesses)
+      onValue(ref(db, `rooms/${localRoomId}/players`), (snap) => {
+        const val = snap.val() || {};
+        // show simple list with guess status; precise results computed when revealed
+        resultsDiv.innerHTML = '';
+        Object.keys(val).forEach(uid => {
+          const p = val[uid];
+          const div = document.createElement('div');
+          div.className = 'player';
+          let txt = `<strong>${p.name}</strong>`;
+          if (p.guess) txt += `<div style="font-size:13px;color:#444">Gissat</div>`;
+          resultsDiv.appendChild(div).innerHTML = txt;
+        });
+      });
+    }
+
+    // Handle running round: show timer
+    let timerInterval = null;
+    function isRoundRunning(round) {
+      const start = round.start;
+      const dur = round.duration || 30;
+      const now = Date.now();
+      const end = start + dur*1000;
+      const left = Math.max(0, Math.round((end-now)/1000));
+      timerP.innerText = `Tid kvar: ${left}s`;
+      if (timerInterval) clearInterval(timerInterval);
+      timerInterval = setInterval(() => {
+        const n = Date.now();
+        const l = Math.max(0, Math.round((end-n)/1000));
+        timerP.innerText = `Tid kvar: ${l}s`;
+        if (l <= 0) {
+          clearInterval(timerInterval);
+          // mark round as ended server-side by setting status idle but keep revealed false
+          update(ref(db, `rooms/${localRoomId}/round`), { status: 'ended' });
+          // Optionally auto-reveal after end: compute and set revealed true
+          // We'll auto-reveal after 2s
+          setTimeout(() => update(ref(db, `rooms/${localRoomId}/round`), { revealed: true }), 2000);
+        }
+      }, 500);
+    }
+
+    // Compute distances between target(s) and guesses and show winner
+    async function computeResultsAndShow() {
+      const roomSnap = await get(ref(db, `rooms/${localRoomId}`));
+      const room = roomSnap.val();
+      if (!room) return;
+
+      // choose a single target to compare to: if multiple targets, pick the most recent
+      const targets = room.targets || {};
+      const targetKeys = Object.keys(targets);
+      if (targetKeys.length === 0) return alert('Inga mål att jämföra mot');
+      const lastKey = targetKeys[targetKeys.length -1];
+      const target = targets[lastKey];
+
+      // compute distances
+      const players = room.players || {};
+      const results = [];
+      Object.keys(players).forEach(uid => {
+        const p = players[uid];
+        if (p.guess) {
+          const d = haversine(target.lat, target.lng, p.guess.lat, p.guess.lng);
+          results.push({ name: p.name, uid, distance_km: d, guess: p.guess });
+        }
+      });
+
+      results.sort((a,b) => a.distance_km - b.distance_km);
+
+      // render
+      resultsDiv.innerHTML = '';
+      results.forEach((r, idx) => {
+        const el = document.createElement('div');
+        el.className = 'player';
+        el.innerHTML = `<strong>#${idx+1} ${r.name}</strong> — ${r.distance_km.toFixed(2)} km`;
+        resultsDiv.appendChild(el);
+      });
+
+      if (results.length > 0) {
+        const winner = results[0];
+        alert(`Vinnare: ${winner.name} — ${winner.distance_km.toFixed(2)} km`);
+      }
+
+      // show target marker prominently
+      Object.values(targetMarkers).forEach(m => map.removeLayer(m));
+      const m = L.marker([target.lat, target.lng]).addTo(map).bindPopup('Rätt mål').openPopup();
+      targetMarkers = { revealed: m };
+    }
+
+    function haversine(lat1, lon1, lat2, lon2) {
+      const R = 6371; // km
+      const dLat = toRad(lat2-lat1);
+      const dLon = toRad(lon2-lon1);
+      const a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)*Math.sin(dLon/2);
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+    function toRad(v){return v*Math.PI/180}
+
+    // Clean up guesses between rounds (admin action)
+    // Admin could reset players' guesses by removing guess keys
+    // Not wired to UI for brevity; can be added later.
+
+    // On page unload, remove player
+    window.addEventListener('beforeunload', async () => {
+      if (localRoomId && currentUid) {
+        try { await remove(ref(db, `rooms/${localRoomId}/players/${currentUid}`)); } catch(e){}
+      }
+    });
+
+    // Optional: makeGuessBtn UI (not strictly necessary with map click)
+    makeGuessBtn.addEventListener('click', () => alert('Klicka på kartan för att gissa — endast en gång per runda'));
+
+    // End of module
+  </script>
+
+  <!-- Leaflet JS (outside module for compatibility) -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</body>
+</html>
